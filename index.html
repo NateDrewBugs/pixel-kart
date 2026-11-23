@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel Kart GP - a GBA-style kart racer</title>
+<meta name="description" content="Pixel Kart GP: a free GBA-style kart racer you play in your browser. 4 tracks, a Grand Prix Cup, drifting and items. Works offline.">
+<meta name="theme-color" content="#1b1836">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pixel Kart">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<style>
+  :root { --bg: #1b1836; --panel: #26214a; --ink: #f1efff; --muted: #b7b2dd;
+          --gold: #ffd23f; --green: #5af06e; --line: #3a3370; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif; }
+  img { image-rendering: pixelated; image-rendering: crisp-edges;
+    display: block; width: 100%; height: auto; border-radius: 10px; }
+  main { max-width: 920px; margin: 0 auto; padding: 28px 18px 48px; }
+  header { text-align: center; }
+  .logo { width: 96px; margin: 0 auto 10px; border-radius: 22px; }
+  h1 { margin: 0; font-size: clamp(34px, 8vw, 56px); letter-spacing: 2px;
+    line-height: 1.1; font-weight: 900; }
+  h1 span:nth-child(1) { color: #ff6a6a; } h1 span:nth-child(2) { color: var(--gold); }
+  h1 span:nth-child(3) { color: #6ee7ff; }
+  .tag { color: var(--muted); margin: 8px 0 22px; }
+  .hero { border: 6px solid #0c0a1c; border-radius: 16px; margin: 0 auto 22px;
+    max-width: 720px; }
+  .hero img { border-radius: 8px; }
+  .play { display: block; width: min(100%, 420px); margin: 0 auto 10px;
+    padding: 18px; border-radius: 16px; background: var(--green); color: #0d3214;
+    font-size: 26px; font-weight: 900; letter-spacing: 3px; text-align: center;
+    text-decoration: none; box-shadow: 0 6px 0 #2a9a3a; }
+  .play:active { transform: translateY(4px); box-shadow: 0 2px 0 #2a9a3a; }
+  .sub { text-align: center; color: var(--muted); font-size: 14px; margin: 0; }
+  h2 { font-size: 22px; margin: 40px 0 14px; }
+  .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px; padding: 0; margin: 0; list-style: none; }
+  .feats li { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 16px; }
+  .feats b { display: block; color: var(--gold); }
+  .tracks { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px; }
+  .tracks figure { margin: 0; }
+  .tracks figcaption { text-align: center; font-weight: 700; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel);
+    border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { color: var(--gold); font-size: 14px; letter-spacing: 1px; }
+  tr:last-child td { border-bottom: 0; }
+  .install { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px; }
+  .install div { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 16px; }
+  .install b { color: var(--gold); }
+  footer { text-align: center; color: var(--muted); font-size: 14px; margin-top: 44px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="icon-192.png" alt="">
+    <h1><span>PIXEL</span> <span>KART</span> <span>GP</span></h1>
+    <p class="tag">A GBA-style kart racer that runs right in your browser.</p>
+  </header>
+
+  <div class="hero"><img src="shot-meadow.png" alt="Racing on Meadow Ring"></div>
+  <a class="play" href="play.html">PLAY NOW</a>
+  <p class="sub">Free &middot; no download &middot; works on phones and computers</p>
+
+  <h2>Features</h2>
+  <ul class="feats">
+    <li><b>4 tracks</b>Meadow Ring, Frost Peak, Dune Run and Neon Night.</li>
+    <li><b>Grand Prix Cup</b>Race all four for points and a trophy.</li>
+    <li><b>Drift &amp; mini-turbo</b>Hold a drift until the sparks turn orange.</li>
+    <li><b>Items</b>Turbo boosts, oil slicks and homing orbs.</li>
+    <li><b>4 racers</b>Blaze, Tide, Moss and Sunny, with rival AI.</li>
+    <li><b>Plays offline</b>Add it to your Home Screen and race anywhere.</li>
+  </ul>
+
+  <h2>Tracks</h2>
+  <div class="tracks">
+    <figure><img src="shot-meadow.png" alt="Meadow Ring"><figcaption>Meadow Ring</figcaption></figure>
+    <figure><img src="shot-frost.png" alt="Frost Peak"><figcaption>Frost Peak</figcaption></figure>
+    <figure><img src="shot-dune.png" alt="Dune Run"><figcaption>Dune Run</figcaption></figure>
+    <figure><img src="shot-neon.png" alt="Neon Night"><figcaption>Neon Night</figcaption></figure>
+  </div>
+
+  <h2>Controls</h2>
+  <table>
+    <tr><th>Action</th><th>Phone</th><th>Keyboard</th></tr>
+    <tr><td>Steer</td><td>Left pad</td><td>Arrows / A, D</td></tr>
+    <tr><td>Gas</td><td>Automatic (or GAS)</td><td>Up / W / Z</td></tr>
+    <tr><td>Brake</td><td>BRAKE</td><td>Down / S / X</td></tr>
+    <tr><td>Hop / drift</td><td>HOP (hold + steer)</td><td>Shift / C</td></tr>
+    <tr><td>Use item</td><td>ITEM</td><td>Space</td></tr>
+    <tr><td>Menu / pause</td><td>START, BACK</td><td>Enter, P, Esc</td></tr>
+  </table>
+
+  <h2>Put it on your Home Screen</h2>
+  <div class="install">
+    <div><b>iPhone / iPad:</b> open <b>Play Now</b> in Safari, tap the
+      Share button, then <b>Add to Home Screen</b>. It opens full-screen
+      and works offline.</div>
+    <div><b>Android:</b> open <b>Play Now</b> in Chrome, tap the
+      &#8942; menu, then <b>Install app</b> or <b>Add to Home screen</b>.</div>
+    <div><b>Computer:</b> just press Play Now. In Chrome or Edge you can
+      also install it from the icon at the end of the address bar.</div>
+  </div>
+
+  <footer>Pixel Kart GP &middot; an original GBA-style kart racer.</footer>
+</main>
+<script>
+  if ("serviceWorker" in navigator && /^https:|^http:\/\/localhost/.test(location.href)) {
+    navigator.serviceWorker.register("sw.js").catch(function () {});
+  }
+</script>
+</body>
+</html>

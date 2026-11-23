@@ -1,0 +1,37 @@
+{
+  "name": "Pixel Kart GP",
+  "short_name": "Pixel Kart",
+  "description": "A GBA-style kart racer: 4 tracks, a Grand Prix Cup, drifting and items.",
+  "start_url": "play.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#1b1836",
+  "theme_color": "#1b1836",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "shot-meadow.png",
+      "sizes": "480x320",
+      "type": "image/png",
+      "form_factor": "wide"
+    }
+  ]
+}
