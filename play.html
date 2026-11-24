@@ -52,6 +52,16 @@ canvas {
 body.app { background: #1b1836; }
 body.app canvas { box-sizing: content-box; border: 2.2vmin solid #0c0a1c;
   border-radius: 2.5vmin; }
+/* full-screen landscape: no console frame, buttons barely there */
+body.app.full { background: #000; }
+body.app.full canvas { border: none; border-radius: 0; }
+#touch.land button, #touch.land #pad { border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.05); color: rgba(255, 255, 255, 0.7); }
+#touch.land button.on, #touch.land #pad.on { background: rgba(255, 255, 255, 0.22); }
+#touch.land #btns .gas { background: rgba(90, 240, 110, 0.1); }
+#touch.land #btns .hop { background: rgba(80, 170, 255, 0.1); }
+#touch.land #pad span { opacity: 0.5; }
+#touch.land #sys button { padding: 1vmin 2.4vmin; font-size: 2.6vmin; }
 #safe { position: fixed; top: env(safe-area-inset-top);
   left: env(safe-area-inset-left); right: env(safe-area-inset-right);
   bottom: env(safe-area-inset-bottom); pointer-events: none;
@@ -105,6 +115,15 @@ body.app canvas { box-sizing: content-box; border: 2.2vmin solid #0c0a1c;
 */
 var W = 240, H = 160;
 var IS_TOUCH = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
+// The real screen width in pixels. Phones draw the race at their own wide
+// shape so it fills the whole screen; menus stay 240 wide (W), centred.
+var FBW = 240;
+if (IS_TOUCH && window.screen) {
+  var scrA = Math.max(screen.width, screen.height) / Math.max(1, Math.min(screen.width, screen.height));
+  FBW = Math.max(240, Math.min(360, 2 * Math.round(80 * scrA)));
+}
+var OX = 0;                       // where the 240-wide layout starts on screen
+var TOUCH_FULL = false;           // phone in landscape: game fills the screen
 var K_OK = IS_TOUCH ? "START" : "ENTER", K_BACK = IS_TOUCH ? "BACK" : "ESC";
 var CAM_H = 18, CAM_BACK = 26, MAP = 1024, ROAD_R = 30, KERB_R = 35, LAPS = 3;
 var BASE_SPEED = 140, TAU = Math.PI * 2;
@@ -113,9 +132,9 @@ var GRAV = 300, FALL_T = 0.9;            // ramp jumps, falling off the track
 // surface kinds in the track map
 var K_GROUND = 0, K_ROAD = 1, K_KERB = 2, K_VOID = 3, K_PAD = 4, K_RAMP = 5;
 // split-screen / full-screen camera views
-var VIEW_FULL = [{ x0: 0, y0: 0, w: 240, h: 160, horizon: 56, focal: 120 }];
-var VIEW_SPLIT = [{ x0: 0, y0: 0, w: 240, h: 79, horizon: 26, focal: 64 },
-                  { x0: 0, y0: 81, w: 240, h: 79, horizon: 107, focal: 64 }];
+var VIEW_FULL = [{ x0: 0, y0: 0, w: FBW, h: 160, horizon: 56, focal: 120 }];
+var VIEW_SPLIT = [{ x0: 0, y0: 0, w: FBW, h: 79, horizon: 26, focal: 64 },
+                  { x0: 0, y0: 81, w: FBW, h: 79, horizon: 107, focal: 64 }];
 
 var THEMES = [
   { name: "MEADOW RING", scenery: "pine",
@@ -344,24 +363,30 @@ function rand(a, b) { return a + Math.random() * (b - a); }
 
 // ---------------------------------------------------------------- frame
 var canvas = document.getElementById("screen");
+canvas.width = FBW; canvas.height = H;
 var ctx = canvas.getContext("2d");
-var img = ctx.createImageData(W, H);
+var img = ctx.createImageData(FBW, H);
 var fb = new Uint32Array(img.data.buffer);
 
+// layout x -> screen x. Something spanning the whole layout width
+// (a backdrop, a dimmer) spans the whole real screen instead.
+function layX(x, w) { return x <= 0 && x + w >= W ? [0, FBW] : [x + OX, w]; }
 function fillRect(x, y, w, h, col) {
+  var L = layX(x, w); x = L[0]; w = L[1];
   var x0 = Math.max(0, x | 0), y0 = Math.max(0, y | 0);
-  var x1 = Math.min(W, (x + w) | 0), y1 = Math.min(H, (y + h) | 0);
+  var x1 = Math.min(FBW, (x + w) | 0), y1 = Math.min(H, (y + h) | 0);
   for (var yy = y0; yy < y1; yy++) {
-    var o = yy * W;
+    var o = yy * FBW;
     for (var xx = x0; xx < x1; xx++) { fb[o + xx] = col; }
   }
 }
 function darkenRect(x, y, w, h, keep) {   // keep = 0..1 brightness
+  var L = layX(x, w); x = L[0]; w = L[1];
   var x0 = Math.max(0, x | 0), y0 = Math.max(0, y | 0);
-  var x1 = Math.min(W, (x + w) | 0), y1 = Math.min(H, (y + h) | 0);
+  var x1 = Math.min(FBW, (x + w) | 0), y1 = Math.min(H, (y + h) | 0);
   for (var yy = y0; yy < y1; yy++) {
     for (var xx = x0; xx < x1; xx++) {
-      var i = yy * W + xx, c = fb[i];
+      var i = yy * FBW + xx, c = fb[i];
       fb[i] = (0xFF000000 | ((((c >> 16) & 255) * keep) << 16) |
                ((((c >> 8) & 255) * keep) << 8) | ((c & 255) * keep)) >>> 0;
     }
@@ -602,23 +627,25 @@ var BOX_FRAMES = [];
 });
 
 // ---- clipping: world drawing stays inside its split-screen view
-var CLIP = { x0: 0, y0: 0, x1: W, y1: H };
+var CLIP = { x0: 0, y0: 0, x1: FBW, y1: H };
 function setClip(x0, y0, x1, y1) {
   CLIP.x0 = x0; CLIP.y0 = y0; CLIP.x1 = x1; CLIP.y1 = y1;
 }
 function fillRectC(x, y, w, h, col) {
+  x += OX;
   var x0 = Math.max(CLIP.x0, x | 0), y0 = Math.max(CLIP.y0, y | 0);
   var x1 = Math.min(CLIP.x1, (x + w) | 0), y1 = Math.min(CLIP.y1, (y + h) | 0);
   for (var yy = y0; yy < y1; yy++) {
-    for (var xx = x0; xx < x1; xx++) { fb[yy * W + xx] = col; }
+    for (var xx = x0; xx < x1; xx++) { fb[yy * FBW + xx] = col; }
   }
 }
 function darkenRectC(x, y, w, h, keep) {
+  x += OX;
   var x0 = Math.max(CLIP.x0, x | 0), y0 = Math.max(CLIP.y0, y | 0);
   var x1 = Math.min(CLIP.x1, (x + w) | 0), y1 = Math.min(CLIP.y1, (y + h) | 0);
   for (var yy = y0; yy < y1; yy++) {
     for (var xx = x0; xx < x1; xx++) {
-      var i = yy * W + xx, c = fb[i];
+      var i = yy * FBW + xx, c = fb[i];
       fb[i] = (0xFF000000 | ((((c >> 16) & 255) * keep) << 16) |
                ((((c >> 8) & 255) * keep) << 8) | ((c & 255) * keep)) >>> 0;
     }
@@ -695,11 +722,11 @@ function blit(spr, cx, bottom, scale, flip, lift, scaleY) {
   if (tw > 480 || th > 480) { return; }
   // round the anchor first, then offset by whole pixels: rounding "cx - tw/2"
   // made odd-width sprites (heavy karts) flip a pixel left/right every frame
-  var x0 = Math.round(cx) - (tw >> 1), y0 = Math.round(bottom - (lift || 0)) - th;
+  var x0 = Math.round(cx + OX) - (tw >> 1), y0 = Math.round(bottom - (lift || 0)) - th;
   var sx0 = Math.max(0, CLIP.x0 - x0), sy0 = Math.max(0, CLIP.y0 - y0);
   var sx1 = Math.min(tw, CLIP.x1 - x0), sy1 = Math.min(th, CLIP.y1 - y0);
   for (var y = sy0; y < sy1; y++) {
-    var row = Math.floor(y * spr.h / th) * spr.w, o = (y0 + y) * W + x0;
+    var row = Math.floor(y * spr.h / th) * spr.w, o = (y0 + y) * FBW + x0;
     for (var x = sx0; x < sx1; x++) {
       var col = Math.floor(x * spr.w / tw);
       if (flip) { col = spr.w - 1 - col; }
@@ -2317,7 +2344,7 @@ Renderer.prototype.world = function (vp, cx, cy, ang, race, t) {
       var col = D.sky[y - vp.y0];
       if (y > hz - hf) { col = (y <= hz - hf + 2 && hf > 13 * fs) ? C.snow : C.far; }
       if (y > hz - hn) { col = C.near; }
-      fb[y * W + X] = col;
+      fb[y * FBW + X] = col;
     }
   }
   for (var si = 0; si < this.stars.length; si++) {
@@ -2325,14 +2352,14 @@ Renderer.prototype.world = function (vp, cx, cy, ang, race, t) {
     var stx = ((((st[0] - shF) % Pf) + Pf) % Pf) * fs;
     var sty = vp.y0 + ((hz - vp.y0 - 16 * fs) * st[1]) | 0;
     if (stx < vp.w && (Math.floor(t * 3 + si) % 7) !== 0) {
-      fb[sty * W + vp.x0 + (stx | 0)] = st[2];
+      fb[sty * FBW + vp.x0 + (stx | 0)] = st[2];
     }
   }
   // Mode 7 ground
   var low = this.theme.skyLow, tex = this.track.tex, vt = this.voidTile;
   var hr = low[0], hg = low[1], hb = low[2];
   for (var r = 0; r < D.NR; r++) {
-    var z = D.Z[r], f = D.FOG[r], base = (hz + 1 + r) * W + vp.x0;
+    var z = D.Z[r], f = D.FOG[r], base = (hz + 1 + r) * FBW + vp.x0;
     var bx = cx + c * z, by = cy + s * z;
     for (x = 0; x < vp.w; x++) {
       var L = z * D.LAT[x];
@@ -2350,7 +2377,7 @@ Renderer.prototype.world = function (vp, cx, cy, ang, race, t) {
     }
   }
   this.sprites(race, t);
-  setClip(0, 0, W, H);
+  setClip(0, 0, FBW, H);
 };
 Renderer.prototype.project = function (x, y) {
   var vp = this.vp, dx = x - this.cx, dy = y - this.cy;
@@ -2641,6 +2668,12 @@ Renderer.prototype.kart = function (kt, sx, sy, k, t) {
     fillRectC(fx[n][0] | 0, fx[n][1] | 0, sz, sz, pk(fx[n][2]));
   }
 };
+// the 3D view always draws in real screen pixels, never shifted like menus
+var worldDraw0 = Renderer.prototype.world;
+Renderer.prototype.world = function () {
+  var o = OX; OX = 0;
+  try { return worldDraw0.apply(this, arguments); } finally { OX = o; }
+};
 
 // ---------------------------------------------------------------- game
 var CUP_POINTS = [10, 8, 6, 5, 4, 3, 2, 1];
@@ -2720,6 +2753,7 @@ Game.prototype.goBack = function () {
 Game.prototype.addHot = function (x, y, w, h, fn, hover) { this.hot.push([x, y, w, h, fn, hover]); };
 // mouse moving over a menu option highlights it
 Game.prototype.hoverAt = function (x, y) {
+  x -= this.hotOX || 0;
   for (var i = this.hot.length - 1; i >= 0; i--) {
     var h = this.hot[i];
     if (x >= h[0] && x < h[0] + h[2] && y >= h[1] && y < h[1] + h[3]) {
@@ -2729,6 +2763,7 @@ Game.prototype.hoverAt = function (x, y) {
   }
 };
 Game.prototype.click = function (x, y) {
+  x -= this.hotOX || 0;                      // screen -> menu layout
   for (var i = this.hot.length - 1; i >= 0; i--) {
     var h = this.hot[i];
     if (x >= h[0] && x < h[0] + h[2] && y >= h[1] && y < h[1] + h[3]) { h[4](); return; }
@@ -2971,10 +3006,17 @@ Game.prototype.rowHot = function (n, x, y, w, h, instant) {
   }, mark);
 };
 
+// Menus are laid out 240 wide and centred on wider (phone) screens; the
+// race view and its HUD use the whole screen.
 Game.prototype.render = function () {
+  this.hotOX = OX = (FBW - 240) >> 1;
+  this.renderInner();
+  OX = 0;
+};
+Game.prototype.renderInner = function () {
   var st = this.state, self = this;
   this.hot = [];
-  setClip(0, 0, W, H);
+  setClip(0, 0, FBW, H);
   if (st === "loading") {
     var th = this.track.theme;
     fillRect(0, 0, W, H, pk([16, 16, 40]));
@@ -3001,6 +3043,8 @@ Game.prototype.render = function () {
   }
   if (views.length === 2) { fillRect(0, 79, W, 2, pk([10, 8, 24])); }
   if (st === "race") {
+    var layW = W, layOX = OX;
+    W = FBW; OX = 0;                         // the HUD spans the full screen
     for (i = 0; i < views.length; i++) {
       if (views.length === 1) { this.drawHud(rc, 0); }
       else { this.drawHudSplit(rc, i, views[i]); }
@@ -3011,6 +3055,7 @@ Game.prototype.render = function () {
       drawText((IS_TOUCH ? "START" : "P") + " - RESUME   " + K_BACK + " - QUIT",
                W / 2, 90, [220, 220, 255], 1, "c");
     }
+    W = layW; OX = layOX;
     return;
   }
   if (st === "results") {
@@ -3325,19 +3370,22 @@ Game.prototype.drawHud = function (rc, pi) {
   var p = rc.humans[pi], v = rc.views[pi], white = [255, 255, 255];
   if (rc.mode === "battle") {
     var left = Math.max(0, rc.timeLimit - rc.time);
-    drawText(fmtTime(left).slice(0, -3), 4, 4, left < 20 ? [255, 120, 120] : white, 2);
-    this.drawBalloons(p, 5, 19, 6);
-    this.itemIcon(p, 120, 12, 16);
-    darkenRect(W - 28, 3, 26, rc.allKarts.length * 8 + 2, 0.5);
-    this.drawScoreboard(rc, W - 26, 5);
+    var by0 = TOUCH_FULL ? 15 : 0, sy0 = TOUCH_FULL ? 34 : 3;   // clear of phone buttons
+    drawText(fmtTime(left).slice(0, -3), 4, 4 + by0, left < 20 ? [255, 120, 120] : white, 2);
+    this.drawBalloons(p, 5, 19 + by0, 6);
+    this.itemIcon(p, W / 2, 12, 16);
+    darkenRect(W - 28, sy0, 26, rc.allKarts.length * 8 + 2, 0.5);
+    this.drawScoreboard(rc, W - 26, sy0 + 2);
     if (p.out) {
       darkenRect(0, 60, W, 30, 0.5);
       drawText("OUT!", W / 2, 66, [255, 120, 120], 3, "c");
     }
   } else {
-    drawText("LAP " + rc.lapOf(p) + "/" + LAPS, 4, 4, white, 2);
-    drawText(fmtTime(p.finished ? p.finishTime : rc.time), 4, 17, [255, 240, 160], 1);
-    this.itemIcon(p, 120, 12, 16);
+    // full-screen phone: nudge the HUD clear of the floating buttons
+    var dy = TOUCH_FULL ? 15 : 0;
+    drawText("LAP " + rc.lapOf(p) + "/" + LAPS, 4, 4 + dy, white, 2);
+    drawText(fmtTime(p.finished ? p.finishTime : rc.time), 4, 17 + dy, [255, 240, 160], 1);
+    this.itemIcon(p, W / 2, 12, 16);
     if (rc.mode === "tt") {
       var rec = this.ttRecord(this.trackIdx);
       drawText("BEST " + (rec ? fmtTime(rec.time) : "--:--.--"), W - 4, 4,
@@ -3345,20 +3393,20 @@ Game.prototype.drawHud = function (rc, pi) {
       if (rc.ghostKart) { drawText("GHOST", W - 4, 14, [200, 200, 230], 1, "r"); }
     } else {
       var r = rc.ranked.indexOf(p);
-      drawText(PLACE[r], W - 5, H - 20, PLACE_COL[r], 3, "r");
+      drawText(PLACE[r], W - 5, TOUCH_FULL ? 34 : H - 20, PLACE_COL[r], 3, "r");
     }
   }
   // minimap
-  var mx = 4, my = H - 53, x, y, tr = this.track;
+  var mx = 4, my = TOUCH_FULL ? 48 : H - 53, x, y, tr = this.track;
   var outc = pk([16, 16, 32]), road = pk([210, 210, 225]);
   for (y = 0; y < 50; y++) {
     for (x = 0; x < 50; x++) {
-      if (this.r.miniOut[y * 50 + x]) { fb[(my - 1 + y) * W + mx - 1 + x] = outc; }
+      if (this.r.miniOut[y * 50 + x]) { fb[(my - 1 + y) * FBW + mx - 1 + x] = outc; }
     }
   }
   for (y = 0; y < 48; y++) {
     for (x = 0; x < 48; x++) {
-      if (tr.mini[y * 48 + x]) { fb[(my + y) * W + mx + x] = road; }
+      if (tr.mini[y * 48 + x]) { fb[(my + y) * FBW + mx + x] = road; }
     }
   }
   var ks = rc.karts.slice().sort(function (a, b) { return (a === p) - (b === p); });
@@ -3852,7 +3900,7 @@ canvas.addEventListener("pointerdown", function (e) {
   if (!game) { return; }
   var r = canvas.getBoundingClientRect(), cs = getComputedStyle(canvas);
   var bl = parseFloat(cs.borderLeftWidth) || 0, bt = parseFloat(cs.borderTopWidth) || 0;
-  var x = (e.clientX - r.left - bl) * W / canvas.clientWidth;
+  var x = (e.clientX - r.left - bl) * FBW / canvas.clientWidth;
   var y = (e.clientY - r.top - bt) * H / canvas.clientHeight;
   game.click(x, y);
 });
@@ -3860,7 +3908,7 @@ canvas.addEventListener("pointermove", function (e) {     // mouse hover in menu
   if (!game || e.pointerType !== "mouse") { return; }
   var r = canvas.getBoundingClientRect(), cs = getComputedStyle(canvas);
   var bl = parseFloat(cs.borderLeftWidth) || 0, bt = parseFloat(cs.borderTopWidth) || 0;
-  game.hoverAt((e.clientX - r.left - bl) * W / canvas.clientWidth,
+  game.hoverAt((e.clientX - r.left - bl) * FBW / canvas.clientWidth,
                (e.clientY - r.top - bt) * H / canvas.clientHeight);
 });
 function anyHeld(list) {
@@ -3990,13 +4038,22 @@ function padMove(e) {
   // slide your thumb to the bottom of the pad = aim items behind
   var ry = (e.clientY - r.top) / r.height;
   padDown = ry > 0.68; padAhead = ry < 0.32;    // top of the pad = aim ahead
+  // menus: the pad is a 4-way d-pad. Pressing, or sliding into a new
+  // direction, moves one step.
+  var dx = rel, dy = (ry - 0.5) * 2, dir = null;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) > 0.25) {
+    dir = Math.abs(dy) * 1.2 > Math.abs(dx) ? (dy < 0 ? "up" : "down") : (dx < 0 ? "left" : "right");
+  }
+  if (dir && dir !== padDir) { pressed["T_" + dir] = true; }
+  padDir = dir;
 }
+var padDir = null;
 padEl.addEventListener("pointerdown", function (e) {
   e.preventDefault();
   hasFocus = true; padId = e.pointerId;
   if (padEl.setPointerCapture) { padEl.setPointerCapture(e.pointerId); }
-  padMove(e);
-  pressed[padSteer < 0 ? "T_left" : "T_right"] = true;   // menu taps
+  padDir = null;
+  padMove(e);                                           // (also a menu step)
   padEl.className = "on";
 });
 padEl.addEventListener("pointermove", function (e) {
@@ -4004,7 +4061,7 @@ padEl.addEventListener("pointermove", function (e) {
 });
 function padUp(e) {
   if (e.pointerId !== padId) { return; }
-  padId = null; padSteer = 0; padDown = false; padAhead = false; padEl.className = "";
+  padId = null; padSteer = 0; padDown = false; padAhead = false; padDir = null; padEl.className = "";
 }
 padEl.addEventListener("pointerup", padUp);
 padEl.addEventListener("pointercancel", padUp);
@@ -4021,8 +4078,8 @@ function readInputs(state, players) {
   menu.pause = !!(pressed.KeyP || (inRace && pressed.T_start));
   menu.left = anyPressed(["ArrowLeft", "KeyA", "T_left"]);
   menu.right = anyPressed(["ArrowRight", "KeyD", "T_right"]);
-  menu.up = anyPressed(["ArrowUp", "KeyW"]);
-  menu.down = anyPressed(["ArrowDown", "KeyS"]);
+  menu.up = anyPressed(["ArrowUp", "KeyW", "T_up"]);
+  menu.down = anyPressed(["ArrowDown", "KeyS", "T_down"]);
   for (i = 0; i < pads.length; i++) {
     var ps = pads[i];
     if (inRace) { menu.pause = menu.pause || ps.start; menu.back = menu.back || ps.back; }
@@ -4081,15 +4138,20 @@ function fit() {
   var portrait = vh > vw, vmin = Math.min(vw, vh) / 100;
   var safe = document.getElementById("safe").getBoundingClientRect();
   var insetTop = safe.top, insetSide = Math.max(safe.left, vw - safe.right);
-  var bezel = IS_TOUCH ? 4.4 * vmin : 0;
+  // landscape on a phone: the game fills the whole screen and the
+  // see-through buttons float on top of it
+  var bezel = IS_TOUCH && portrait ? 4.4 * vmin : 0;
   vw -= 2 * insetSide + bezel; vh -= insetTop + bezel;
   var availH = IS_TOUCH && portrait ? vh * 0.55 : vh;
-  var availW = IS_TOUCH && !portrait ? Math.max(vw * 0.5, vw - 92 * vmin) : vw;
-  var s = Math.min(availW / W, availH / H);
-  if (IS_TOUCH) { touchUI.className = portrait ? "" : "land"; }
+  var s = Math.min(vw / FBW, availH / H);
+  if (IS_TOUCH) {
+    touchUI.className = portrait ? "" : "land";
+    document.body.className = portrait ? "app" : "app full";
+    TOUCH_FULL = !portrait;
+  }
   var top = IS_TOUCH && portrait ? Math.max(8, vh * 0.04) :
             Math.floor((vh - H * s) / 2);
-  canvas.style.width = Math.floor(W * s) + "px";
+  canvas.style.width = Math.floor(FBW * s) + "px";
   canvas.style.height = Math.floor(H * s) + "px";
   canvas.style.marginTop = Math.floor(top + insetTop) + "px";
   var below = Math.floor(insetTop + top + H * s + bezel);
@@ -4100,7 +4162,7 @@ function fit() {
 }
 window.addEventListener("resize", fit);
 fit();
-if (IS_TOUCH) { document.body.className = "app"; fit(); }
+if (IS_TOUCH) { fit(); }
 // Offline support: cache the game the first time it's opened.
 if ("serviceWorker" in navigator && /^https:|^http:\/\/localhost/.test(location.href)) {
   navigator.serviceWorker.register("sw.js").catch(function () {});
