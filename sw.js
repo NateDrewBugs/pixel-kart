@@ -1,10 +1,11 @@
 // Pixel Kart GP - offline cache. Bump VERSION when you update the game
 // so phones download the new files.
-var VERSION = "pixel-kart-v1";
+var VERSION = "pixel-kart-v33";
 var FILES = ["./", "index.html", "play.html", "manifest.json",
              "icon-192.png", "icon-512.png", "apple-touch-icon.png",
              "shot-meadow.png", "shot-frost.png",
-             "shot-dune.png", "shot-neon.png"];
+             "shot-dune.png", "shot-neon.png", "shot-sky.png",
+             "shot-lava.png", "shot-coral.png", "shot-crystal.png", "race.mp3"];
 
 self.addEventListener("install", function (e) {
   e.waitUntil(caches.open(VERSION).then(function (c) { return c.addAll(FILES); }));
