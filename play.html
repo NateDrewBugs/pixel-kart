@@ -2351,8 +2351,14 @@ function Race(track, humans, opts) {
     this.humans[0].item = "TURBO3"; this.humans[0].charges = 3;
     if (this.ghost) {
       var gr = RACERS[this.ghost.ri];
-      this.ghostKart = new Kart(gr, 0, 0, 0, 0, true, 1);
+      this.ghostKart = new Kart([gr[0], gr[1], this.ghost.kart || gr[2]], 0, 0, 0, 0, true, 1);
       this.ghostKart.ghost = true; this.ghostKart.on = false;
+    }
+    this.rival = opts.rival || null; this.rivalKart = null;    // a ghost from someone's code
+    if (this.rival) {
+      var rr2 = RACERS[this.rival.ri];
+      this.rivalKart = new Kart([rr2[0], rr2[1], this.rival.kart || rr2[2]], 0, 0, 0, 0, true, 1);
+      this.rivalKart.ghost = true; this.rivalKart.rival = true; this.rivalKart.on = false;
     }
   }
   this.views = this.humans.map(function (k) {
@@ -3173,7 +3179,10 @@ Race.prototype.ttGhost = function () {
                      Math.round(me.heading * 100) / 100]);
     }
   }
-  var g = this.ghost, gk = this.ghostKart;
+  ghostPlay(this.ghost, this.ghostKart, t);
+  ghostPlay(this.rival, this.rivalKart, t);
+};
+function ghostPlay(g, gk, t) {
   if (!g || !gk) { return; }
   var f = t / 0.05, a = Math.floor(f);
   if (a + 1 >= g.path.length) { gk.on = false; return; }
@@ -3181,7 +3190,7 @@ Race.prototype.ttGhost = function () {
   gk.on = true;
   gk.x = p0[0] + (p1[0] - p0[0]) * u; gk.y = p0[1] + (p1[1] - p0[1]) * u;
   gk.heading = p0[2] + wrap(p1[2] - p0[2]) * u;
-};
+}
 // ---- rocket start. Hold gas during the countdown to rev the engine: the
 // revs climb while you hold and drop when you let go. Start holding around
 // the middle of "2" so the revs are in the sweet spot at GO (blue puffs on
@@ -3580,6 +3589,7 @@ Renderer.prototype.sprites = function (race, t) {
     for (i = 0; i < race.bombs.length; i++) { add("bomb", race.bombs[i], race.bombs[i].x, race.bombs[i].y); }
     for (i = 0; i < race.splashes.length; i++) { add("splash", race.splashes[i], race.splashes[i].x, race.splashes[i].y); }
     if (race.ghostKart && race.ghostKart.on) { add("kart", race.ghostKart, race.ghostKart.x, race.ghostKart.y); }
+    if (race.rivalKart && race.rivalKart.on) { add("kart", race.rivalKart, race.rivalKart.x, race.rivalKart.y); }
     for (i = 0; i < race.karts.length; i++) {
       var k = race.karts[i];
       add("kart", k, k.x, k.y);
@@ -4051,6 +4061,112 @@ function ttSave(ti, rec) {
   try { localStorage.setItem(ttKey(ti), JSON.stringify(rec)); } catch (e) { }
 }
 
+// ---- ghost codes: share a time trial run as text, race someone else's ghost
+// Format: "PKG1" + z (deflated) or r (raw) + base64url of:
+//   "PK" ver track racer kart | time ms u32 | lap ms u32 | n u16 | samples... | sum u16
+// samples at 10 a second: the first is absolute (x*4 u16, y*4 u16, heading u8),
+// then dx, dy (int8, quarter units) + heading; dx = -128 means absolute again.
+function rivalKey(ti) { return "pkgp_rival_" + ti; }
+function rivalLoad(ti) {
+  try { var v = localStorage.getItem(rivalKey(ti)); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+}
+function rivalSave(ti, rec) { try { localStorage.setItem(rivalKey(ti), JSON.stringify(rec)); } catch (e) { } }
+function rivalClear(ti) { try { localStorage.removeItem(rivalKey(ti)); } catch (e) { } }
+function b64url(bytes) {
+  var s = "", i;
+  for (i = 0; i < bytes.length; i += 8192) { s += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192)); }
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function unb64url(str) {
+  var s = atob(str.replace(/-/g, "+").replace(/_/g, "/")), out = new Uint8Array(s.length);
+  for (var i = 0; i < s.length; i++) { out[i] = s.charCodeAt(i); }
+  return out;
+}
+function zipBytes(bytes, inflate) {          // deflate-raw where the browser has it
+  var cs = inflate ? new DecompressionStream("deflate-raw") : new CompressionStream("deflate-raw");
+  return new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer()
+    .then(function (b) { return new Uint8Array(b); });
+}
+function ghostPack(ti, rec) {
+  var path = rec.path, n = Math.ceil(path.length / 2), out = [], i;
+  function u8(v) { out.push(v & 255); }
+  function u16(v) { u8(v >> 8); u8(v); }
+  function u32(v) { u16(Math.floor(v / 65536)); u16(v % 65536); }
+  function hd(h) { return Math.round(((h % TAU) + TAU) % TAU / TAU * 256) & 255; }
+  var ki = Math.max(0, KARTS.map(function (k) { return k.id; }).indexOf(rec.kart || RACERS[rec.ri][2]));
+  u8(80); u8(75); u8(1); u8(ti); u8(rec.ri); u8(ki);
+  u32(Math.round(rec.time * 1000)); u32(rec.lap === null || rec.lap === undefined ? 0xFFFFFFFF : Math.round(rec.lap * 1000));
+  u16(n);
+  var px = 0, py = 0;
+  for (i = 0; i < n; i++) {
+    var p = path[i * 2], qx = Math.round(p[0] * 4), qy = Math.round(p[1] * 4);
+    var dx = qx - px, dy = qy - py;
+    if (i === 0 || dx < -127 || dx > 127 || dy < -127 || dy > 127) {
+      if (i > 0) { u8(128); }                 // -128: absolute position follows
+      u16(qx); u16(qy);
+    } else { u8(dx); u8(dy); }
+    u8(hd(p[2])); px = qx; py = qy;
+  }
+  var sum = 0;
+  for (i = 0; i < out.length; i++) { sum = (sum + out[i] * (i % 7 + 1)) % 65536; }
+  u16(sum);
+  return new Uint8Array(out);
+}
+function ghostUnpack(b) {
+  var o = 0, i;
+  function u8() { if (o >= b.length) { throw new Error("short"); } return b[o++]; }
+  function s8() { var v = u8(); return v > 127 ? v - 256 : v; }
+  function u16() { return (u8() << 8) | u8(); }
+  function u32() { return u16() * 65536 + u16(); }
+  var sum = 0;
+  for (i = 0; i < b.length - 2; i++) { sum = (sum + b[i] * (i % 7 + 1)) % 65536; }
+  if (((b[b.length - 2] << 8) | b[b.length - 1]) !== sum) { throw new Error("check"); }
+  if (u8() !== 80 || u8() !== 75 || u8() !== 1) { throw new Error("head"); }
+  var ti = u8(), ri = u8(), ki = u8(), time = u32() / 1000, lapR = u32();
+  if (ti >= THEMES.length || ri >= RACERS.length || ki >= KARTS.length) { throw new Error("range"); }
+  var n = u16(), pts = [], x = 0, y = 0;
+  for (i = 0; i < n; i++) {
+    if (i === 0) { x = u16(); y = u16(); }
+    else {
+      var dx = s8();
+      if (dx === -128) { x = u16(); y = u16(); } else { x += dx; y += s8(); }
+    }
+    pts.push([x / 4, y / 4, u8() / 256 * TAU]);
+  }
+  var path = [];                                // back to 20 a second
+  for (i = 0; i < pts.length; i++) {
+    var a = pts[i], c = pts[i + 1];
+    path.push([a[0], a[1], wrap(a[2])]);
+    if (c) {
+      var jump = Math.hypot(c[0] - a[0], c[1] - a[1]) > 40;
+      path.push(jump ? [a[0], a[1], wrap(a[2])] :
+                [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2, wrap(a[2] + wrap(c[2] - a[2]) / 2)]);
+    }
+  }
+  return { ti: ti, rec: { time: time, ri: ri, kart: KARTS[ki].id,
+                          lap: lapR === 0xFFFFFFFF ? null : lapR / 1000, path: path } };
+}
+function ghostEncode(ti, rec) {
+  var raw = ghostPack(ti, rec);
+  if (typeof CompressionStream === "undefined") { return Promise.resolve("PKG1r" + b64url(raw)); }
+  return zipBytes(raw, false).then(function (z) { return "PKG1z" + b64url(z); },
+                                    function () { return "PKG1r" + b64url(raw); });
+}
+function ghostDecode(code) {
+  code = String(code || "").replace(/\s+/g, "");
+  var m = /PKG1([zr])([A-Za-z0-9_-]+)/.exec(code);
+  if (!m) { return Promise.reject(new Error("That doesn't look like a ghost code.")); }
+  var bytes;
+  try { bytes = unb64url(m[2]); } catch (e) { return Promise.reject(new Error("The code is damaged.")); }
+  var p = m[1] === "z" ?
+    (typeof DecompressionStream === "undefined" ? Promise.reject(new Error("This browser can't open zipped codes.")) :
+     zipBytes(bytes, true)) : Promise.resolve(bytes);
+  return p.then(function (raw) {
+    try { return ghostUnpack(raw); } catch (e) { throw new Error("The code is damaged or cut off."); }
+  }, function (e) {
+    throw new Error(/browser/.test(e && e.message) ? e.message : "The code is damaged or cut off.");
+  });
+}
 function Game() {
   this.players = 1; this.sel = [0, 1]; this.mode = "gp"; this.cc = 1;
   this.cursor = 0; this.cupSel = 0; this.trackSel = 0; this.arenaSel = 0;
@@ -4087,8 +4203,9 @@ Game.prototype.afterLoad = function (after) {
 Game.prototype.ttRecord = function (ti) { return ttLoad(ti) || this.ttMem[ti] || null; };
 Game.prototype.startRace = function () {
   var ghost = this.mode === "tt" ? this.ttRecord(this.trackIdx) : null;
+  var rival = this.mode === "tt" ? rivalLoad(this.trackIdx) : null;
   this.race = new Race(this.track, this.sel.slice(0, this.players),
-                       { mode: this.mode, cc: this.cc, ghost: ghost,
+                       { mode: this.mode, cc: this.cc, ghost: ghost, rival: rival,
                          karts: this.kartSel.slice(0, this.players) });
   this.ttNew = false;
   this.state = "race";
@@ -4345,7 +4462,8 @@ Game.prototype.raceOver = function () {
   if (this.mode === "tt") {
     var me = this.race.humans[0], old = this.ttRecord(this.trackIdx);
     if (me.finished && (!old || me.finishTime < old.time)) {
-      var rec = { time: me.finishTime, ri: me.ri, lap: me.bestLap, path: this.race.rec };
+      var rec = { time: me.finishTime, ri: me.ri, lap: me.bestLap, path: this.race.rec,
+                  kart: this.kartSel[0] };
       this.ttMem[this.trackIdx] = rec; ttSave(this.trackIdx, rec);
       this.ttNew = true;
       Sfx.play("achieve");
@@ -4431,6 +4549,7 @@ Game.prototype.update = function (dt, inp) {
   if (st !== "loading" && st !== "race" && st !== "results" && st !== "standings" && st !== "after" &&
       st !== "trophy") { this.attract += dt * 25; }
   this.buyMsgT = Math.max(0, (this.buyMsgT || 0) - dt);
+  this.ghostMsgT = Math.max(0, (this.ghostMsgT || 0) - dt);
   if (st === "after") {
     this.race.update(dt, [new Controls(), new Controls()]);   // they keep driving behind
     if (m.up) { this.cursor = (this.cursor + AFTER_ITEMS.length - 1) % AFTER_ITEMS.length; }
@@ -4926,8 +5045,44 @@ Game.prototype.drawTracks = function () {
   drawText(tags.length ? tags.join(" ") : "CLASSIC", 195, 106, [220, 220, 255], 1, "c");
   this.button(gp ? 70 : 90, 120, gp ? 100 : 60, gp ? "START CUP" : "RACE!",
               [90, 240, 110], function () { self.startTracks(); });
+  if (this.mode === "tt") {                          // ghost codes
+    var rv = rivalLoad(sti);
+    drawText(rv ? "RIVAL " + fmtTime(rv.time) : "NO RIVAL", 195, 118,
+             rv ? [255, 150, 230] : [120, 120, 150], 1, "c");
+    this.button(8, 140, 70, "SHARE GHOST", [120, 200, 255], function () { self.shareGhost(sti); });
+    this.button(84, 140, 70, "LOAD GHOST", [255, 150, 230], function () { self.loadGhost(sti); });
+    if (rv) { this.button(160, 140, 72, "CLEAR RIVAL", [200, 110, 110], function () { rivalClear(sti); }); }
+    if (this.ghostMsgT > 0) {
+      darkenRect(0, 126, W, 11, 0.7);
+      drawText(this.ghostMsg, W / 2, 128, [255, 240, 160], 1, "c");
+    }
+    return;
+  }
   drawText(gp ? "ALL 4 TRACKS, IN ORDER" : (IS_TOUCH ? "TAP A TRACK, THEN RACE!" :
            "CLICK TWICE OR " + K_OK + " TO RACE"), W / 2, 142, [255, 240, 160], 1, "c");
+};
+Game.prototype.ghostNote = function (msg) { this.ghostMsg = msg; this.ghostMsgT = 3; };
+Game.prototype.shareGhost = function (ti) {
+  var rec = this.ttRecord(ti), self = this;
+  if (!rec || !rec.path || !rec.path.length) { this.ghostNote("SET A TIME ON THIS TRACK FIRST"); return; }
+  ghostEncode(ti, rec).then(function (code) {
+    openGhostPanel({ mode: "share", code: code, title: THEMES[ti].name + " - " + fmtTime(rec.time) });
+  }, function () { self.ghostNote("COULDN'T MAKE A CODE"); });
+};
+Game.prototype.loadGhost = function () {
+  var self = this;
+  openGhostPanel({ mode: "load", onCode: function (code, done) {
+    ghostDecode(code).then(function (g) {
+      rivalSave(g.ti, g.rec);
+      // jump to that track so you can race it straight away
+      for (var c = 0; c < CUPS.length; c++) {
+        var tn = CUPS[c].tracks.indexOf(g.ti);
+        if (tn >= 0) { self.cupSel = c; self.trackSel = tn; self.cursor = tn; }
+      }
+      self.ghostNote("RIVAL LOADED: " + THEMES[g.ti].name);
+      done(null);
+    }, function (e) { done(e.message || "That code didn't work."); });
+  } });
 };
 Game.prototype.drawArenas = function () {
   var self = this;
@@ -5111,6 +5266,9 @@ Game.prototype.drawHud = function (rc, pi) {
       drawText("BEST " + (rec ? fmtTime(rec.time) : "--:--.--"), W - 4, 4,
                [140, 230, 255], 1, "r");
       if (rc.ghostKart) { drawText("GHOST", W - 4, 14, [200, 200, 230], 1, "r"); }
+      if (rc.rival) {
+        drawText("RIVAL " + fmtTime(rc.rival.time), W - 4, rc.ghostKart ? 24 : 14, [255, 150, 230], 1, "r");
+      }
     } else {
       var r = rc.ranked.indexOf(p);
       drawText(PLACE[r], W - 5, TOUCH_FULL ? 34 : H - 20, PLACE_COL[r], 3, "r");
@@ -5131,13 +5289,14 @@ Game.prototype.drawHud = function (rc, pi) {
   }
   var ks = rc.karts.slice().sort(function (a, b) { return (a === p) - (b === p); });
   if (rc.ghostKart && rc.ghostKart.on) { ks.unshift(rc.ghostKart); }
+  if (rc.rivalKart && rc.rivalKart.on) { ks.unshift(rc.rivalKart); }
   for (var i = 0; i < ks.length; i++) {
     var k = ks[i];
     var px = mx + Math.floor(k.x / tr.miniScale), py = my + Math.floor(k.y / tr.miniScale);
     if (k === p) {
       fillRect(px - 2, py - 2, 4, 4, Math.floor(rc.t * 6) % 2 ? pk(white) : pk(k.color));
     }
-    fillRect(px - 1, py - 1, 2, 2, pk(k.ghost ? [200, 200, 230] : k.color));
+    fillRect(px - 1, py - 1, 2, 2, pk(k.rival ? [255, 150, 230] : k.ghost ? [200, 200, 230] : k.color));
   }
   for (i = 0; i < rc.comets.length; i++) {        // incoming comet
     var cm = rc.comets[i];
@@ -5221,6 +5380,13 @@ Game.prototype.drawResults = function (rc) {
       drawText("NEW RECORD!", W / 2, 88, [255, 230, 90], 2, "c");
     } else if (!this.ttNew && rec) {
       drawText("RECORD " + fmtTime(rec.time), W / 2, 92, [200, 200, 230], 1, "c");
+    }
+    if (rc.rival) {                                  // how you did against the loaded ghost
+      var dv = me.finished ? me.finishTime - rc.rival.time : null;
+      drawText(dv === null ? "RIVAL " + fmtTime(rc.rival.time) :
+               dv < 0 ? "BEAT THE RIVAL BY " + (-dv).toFixed(2) + "S" :
+               "RIVAL WAS " + dv.toFixed(2) + "S FASTER", W / 2, 102,
+               dv !== null && dv < 0 ? [120, 240, 140] : [255, 150, 230], 1, "c");
     }
   } else if (rc.mode === "battle") {
     drawText("BATTLE RESULTS", W / 2, 6, [200, 140, 255], 2, "c");
@@ -6450,6 +6616,59 @@ function openSmokePanel() {
   camEl.addEventListener("input", function () { CAM_TUNE = +this.value; showCam(); });
   showCam();
   show();
+}
+// ---- ghost code panel: copy your code, or paste a friend's
+var ghostPanel = null;
+function openGhostPanel(o) {
+  if (ghostPanel) { ghostPanel.parentNode.removeChild(ghostPanel); ghostPanel = null; }
+  var d = document.createElement("div");
+  d.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:70;" +
+    "background:rgba(18,14,44,0.95);color:#fff;font:13px system-ui,sans-serif;border-radius:12px;" +
+    "padding:12px;width:min(420px,88vw);box-shadow:0 6px 30px rgba(0,0,0,0.6)";
+  var share = o.mode === "share";
+  d.innerHTML =
+    '<b style="color:' + (share ? '#8fd8ff' : '#ff96e6') + '">' + (share ? 'YOUR GHOST CODE' : 'LOAD A GHOST') + '</b>' +
+    '<div style="color:#bbb;margin:4px 0 8px">' + (share ? (o.title + ' &mdash; send this to a friend. They paste it in Time Trials &rarr; Load Ghost.') :
+      'Paste a ghost code from a friend. It loads on its own track as your rival.') + '</div>' +
+    '<textarea id="gcText" spellcheck="false" style="width:100%;box-sizing:border-box;height:110px;font:11px monospace;' +
+    'background:#0d0b22;color:#dfe;border:1px solid #4a4580;border-radius:6px;padding:6px;word-break:break-all"' +
+    (share ? ' readonly' : ' placeholder="PKG1..."') + '></textarea>' +
+    '<div id="gcMsg" style="min-height:16px;margin:6px 0;color:#ffd84a"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+    (share ? '<button id="gcGo">Copy</button>' : '<button id="gcPaste">Paste</button><button id="gcGo">Load</button>') +
+    '<button id="gcClose">Close</button></div>';
+  ["pointerdown", "pointerup", "touchstart", "touchend", "mousedown", "click", "keydown", "keyup"].forEach(function (ev) {
+    d.addEventListener(ev, function (e) { e.stopPropagation(); }, false);
+  });
+  document.body.appendChild(d);
+  ghostPanel = d;
+  var ta = document.getElementById("gcText"), msg = document.getElementById("gcMsg");
+  function close() { if (ghostPanel) { ghostPanel.parentNode.removeChild(ghostPanel); ghostPanel = null; } }
+  document.getElementById("gcClose").onclick = close;
+  if (share) {
+    ta.value = o.code;
+    msg.textContent = o.code.length + " characters";
+    document.getElementById("gcGo").onclick = function () {
+      ta.focus(); ta.select();
+      var ok = function () { msg.textContent = "Copied!"; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(o.code).then(ok, function () {
+          try { document.execCommand("copy"); ok(); } catch (e) { msg.textContent = "Select the text and copy it."; }
+        });
+      } else { try { document.execCommand("copy"); ok(); } catch (e) { msg.textContent = "Select the text and copy it."; } }
+    };
+  } else {
+    document.getElementById("gcPaste").onclick = function () {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(function (t) { ta.value = t; }, function () { msg.textContent = "Long-press the box and choose Paste."; });
+      } else { msg.textContent = "Long-press the box and choose Paste."; }
+    };
+    document.getElementById("gcGo").onclick = function () {
+      msg.textContent = "Loading...";
+      o.onCode(ta.value, function (err) { if (err) { msg.textContent = err; } else { close(); } });
+    };
+    setTimeout(function () { ta.focus(); }, 50);
+  }
 }
 </script>
 </body>
