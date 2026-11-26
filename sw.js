@@ -1,6 +1,7 @@
 // Pixel Kart GP - offline cache. Bump VERSION when you update the game
 // so phones download the new files.
-var VERSION = "pixel-kart-v106";
+var VERSION = "pixel-kart-v135";
+var MUSIC = "pixel-kart-music";          // each track's song, kept across updates
 var FILES = ["./", "index.html", "play.html", "manifest.json",
              "icon-192.png", "icon-512.png", "apple-touch-icon.png",
              "shot-meadow.png", "shot-frost.png",
@@ -14,6 +15,7 @@ self.addEventListener("install", function (e) {
 self.addEventListener("activate", function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
     return Promise.all(keys.filter(function (k) { return k !== VERSION; })
+      .filter(function (k) { return k !== MUSIC; })     // songs survive updates
       .map(function (k) { return caches.delete(k); }));
   }));
   self.clients.claim();
@@ -21,6 +23,14 @@ self.addEventListener("activate", function (e) {
 // Network first (so updates arrive), falling back to the cache offline.
 self.addEventListener("fetch", function (e) {
   if (e.request.method !== "GET") { return; }
+  if (e.request.url.indexOf("/music/") >= 0) {   // songs: from the cache once downloaded
+    e.respondWith(caches.open(MUSIC).then(function (c) {
+      return c.match(e.request).then(function (m) {
+        return m || fetch(e.request).then(function (r) { if (r.ok) { c.put(e.request, r.clone()); } return r; });
+      });
+    }));
+    return;
+  }
   e.respondWith(fetch(e.request).then(function (r) {
     var copy = r.clone();
     caches.open(VERSION).then(function (c) { c.put(e.request, copy); });
